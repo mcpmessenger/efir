@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { SiteHeaderClient } from '@/components/site-header-client'
 
 const iconUrl = 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/efir-icon-transparent-Zjev5iVcHNZjn9ssKntq38PFqaOUtv.png'
 const lightWordmarkUrl = 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/efir-wordmark-transparent-WAAM4U9ejz4vp1ewemT7b45xQq0Z9r.png'
@@ -13,12 +14,7 @@ export function Wordmark({ dark = false }: { dark?: boolean }) {
 }
 
 export function SiteHeader() {
-  return (
-    <header className="site-header">
-      <Link href="/" className="brand-link" aria-label="EFIR home"><Wordmark /></Link>
-      <span className="on-air"><span className="on-air-dot" /> ON AIR</span>
-    </header>
-  )
+  return <SiteHeaderClient />
 }
 
 export function SiteFooter() {

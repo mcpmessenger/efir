@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import './manage.css'
+import { AuthProvider } from '@/components/auth-provider'
 
 export const metadata: Metadata = {
   title: { default: 'EFIR — Highlight it. Broadcast it.', template: '%s | EFIR' },
-  description: 'EFIR is you, on the topic, on everyone’s TV. Record a take on your phone and broadcast it as your channel.',
+  description: 'Manage your EFIR channel, share public takes, and watch creator channels from any browser.',
   applicationName: 'EFIR',
   metadataBase: new URL('https://efir.fm'),
   openGraph: {
@@ -20,5 +22,5 @@ export const metadata: Metadata = {
 export const viewport: Viewport = { colorScheme: 'dark', themeColor: '#08080C' }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><head><link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" /><link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" /></head><body>{children}</body></html>
+  return <html lang="en"><head><link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" /><link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" /></head><body><AuthProvider>{children}</AuthProvider></body></html>
 }
