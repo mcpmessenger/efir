@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     images: [{ url: '/opengraph-image', width: 1200, height: 630, alt: 'EFIR — Highlight it. Broadcast it.' }],
   },
   twitter: { card: 'summary_large_image', title: 'EFIR — Highlight it. Broadcast it.', description: 'Highlight it. Broadcast it.', images: ['/opengraph-image'] },
-  icons: { icon: '/icon.svg', apple: '/apple-icon.png' },
+  icons: { icon: '/icon.png', apple: '/apple-icon.png' },
 }
 
 export const viewport: Viewport = { colorScheme: 'dark', themeColor: '#08080C' }
