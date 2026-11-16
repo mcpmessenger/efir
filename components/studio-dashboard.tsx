@@ -20,7 +20,7 @@ async function loadStudio(user: User): Promise<StudioData> {
   const supabase = createClient()
   const [profileResult, takesResult] = await Promise.all([
     supabase.from('profiles').select('id,display_name,username,avatar_url').eq('id', user.id).maybeSingle(),
-    supabase.from('takes').select(takeColumns).order('created_at', { ascending: false }),
+    supabase.from('takes').select(takeColumns).eq('user_id', user.id).order('created_at', { ascending: false }),
   ])
   if (profileResult.error) throw profileResult.error
   if (takesResult.error) throw takesResult.error
@@ -139,17 +139,22 @@ export function StudioDashboard() {
 
     try {
       const supabase = createClient()
-      for (const [bucket, paths] of storageObjects(take)) {
-        const { error: storageError } = await supabase.storage.from(bucket).remove(paths)
-        if (storageError) throw storageError
-      }
-
       const { error: deleteError } = await supabase.from('takes').delete().eq('id', take.id).eq('user_id', user.id)
       if (deleteError) throw deleteError
+
+      for (const [bucket, paths] of storageObjects(take)) {
+        try {
+          const { error: storageError } = await supabase.storage.from(bucket).remove(paths)
+          if (storageError) console.warn('Storage cleanup warning:', storageError)
+        } catch (storageError) {
+          console.warn('Storage cleanup warning:', storageError)
+        }
+      }
+
       setPendingDelete(null)
       await mutate()
     } catch {
-      setActionError('The take could not be deleted. Its media may be restricted by storage permissions.')
+      setActionError('The take could not be deleted. Check your connection and try again.')
     } finally {
       setBusyTakeId(null)
     }
