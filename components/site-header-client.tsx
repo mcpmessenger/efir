@@ -36,6 +36,7 @@ export function SiteHeaderClient() {
   return <header className="site-header">
     <Link href="/" className="brand-link" aria-label="EFIR home"><Wordmark /></Link>
     {loading ? <span className="header-loading" aria-label="Checking sign-in status" /> : user ? <div className="header-account">
+      <Link href="/watch" className="header-studio-link">Watch</Link>
       <Link href="/studio" className="header-channel-link">
         {avatar ? <img className="header-avatar" src={avatar} alt="" /> : <span className="header-avatar header-avatar-fallback" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>}
         <span className="header-account-name">{name}</span>
@@ -43,6 +44,9 @@ export function SiteHeaderClient() {
       <Link href="/studio" className="header-studio-link">Your Channel</Link>
       <button className="header-signout" type="button" onClick={() => void signOut()}><LogOut aria-hidden="true" /><span>Sign out</span></button>
       {signOutError && <span className="header-auth-error" role="status">{signOutError}</span>}
-    </div> : <GoogleSignInButton compact />}
+    </div> : <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+      <Link href="/watch" className="header-studio-link">Watch</Link>
+      <GoogleSignInButton compact />
+    </div>}
   </header>
 }

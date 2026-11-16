@@ -1,5 +1,6 @@
 import { ArrowDownRight, ArrowUpRight, AudioLines, CirclePlay, ScanLine, Tv2, Video } from 'lucide-react'
 import { Disclosure, EfIrMark, SiteShell } from '@/components/efir-site'
+import { AirwavesRail } from '@/components/airwaves-rail'
 
 const steps = [
   { number: '01', title: 'Record', icon: AudioLines, text: 'Voice or face. Sixty seconds. Straight from the moment you’re watching.' },
@@ -22,6 +23,9 @@ export default function Page() {
           </div>
           <div className="hero-coordinate" aria-hidden="true">EFIR / LIVE<br />37° 46′ N · 122° 25′ W</div>
         </section>
+
+        {/* Living Hero: LIVE — THE AIRWAVES */}
+        <AirwavesRail />
 
         <section id="how-it-works" className="steps-section section-wrap">
           <div className="section-heading"><p className="eyebrow">FROM THE MOMENT TO THE SCREEN</p><h2>A point of view,<br />in the room.</h2></div>
