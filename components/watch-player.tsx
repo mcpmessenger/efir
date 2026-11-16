@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import {
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { FeedItem, fetchAirwavesFeed } from '@/lib/feed'
 import { Disclosure, EfIrMark } from '@/components/efir-site'
+import { createClient } from '@/lib/supabase/client'
 
 interface WatchPlayerProps {
   initialTakes?: FeedItem[]
@@ -24,12 +25,14 @@ export function WatchPlayer({ initialTakes = [] }: WatchPlayerProps) {
   const searchParams = useSearchParams()
   const takeParam = searchParams.get('take')
 
-  const [takes, setTakes] = useState<FeedItem[]>(initialTakes)
+  const [rawTakes, setRawTakes] = useState<FeedItem[]>(initialTakes)
+  const [streamMode, setStreamMode] = useState<'airwaves' | 'top'>('airwaves')
   const [loading, setLoading] = useState(initialTakes.length === 0)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isMuted, setIsMuted] = useState(true)
   const [isPlaying, setIsPlaying] = useState(true)
   const [imageProgress, setImageProgress] = useState(0)
+  const [userVotes, setUserVotes] = useState<Record<string, number>>({})
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -40,7 +43,7 @@ export function WatchPlayer({ initialTakes = [] }: WatchPlayerProps) {
   useEffect(() => {
     fetchAirwavesFeed()
       .then((data) => {
-        setTakes(data)
+        setRawTakes(data)
         if (takeParam) {
           const idx = data.findIndex((t) => t.id === takeParam || t.slug === takeParam)
           if (idx !== -1) setCurrentIndex(idx)
@@ -53,66 +56,125 @@ export function WatchPlayer({ initialTakes = [] }: WatchPlayerProps) {
       })
   }, [takeParam])
 
+  // Active takes list based on stream mode (Airwaves vs Top Takes)
+  const takes = useMemo(() => {
+    if (streamMode === 'top') {
+      return [...rawTakes].sort((a, b) => {
+        const scoreA = (a.reactions?.up || 0) - (a.reactions?.down || 0)
+        const scoreB = (b.reactions?.up || 0) - (b.reactions?.down || 0)
+        return scoreB - scoreA
+      })
+    }
+    return rawTakes
+  }, [rawTakes, streamMode])
+
   const currentTake = takes[currentIndex] || null
 
   const handleNext = useCallback(() => {
     if (takes.length === 0) return
     setCurrentIndex((prev) => (prev + 1) % takes.length)
-    setIsPlaying(true)
     setImageProgress(0)
   }, [takes.length])
 
   const handlePrev = useCallback(() => {
     if (takes.length === 0) return
     setCurrentIndex((prev) => (prev - 1 + takes.length) % takes.length)
-    setIsPlaying(true)
     setImageProgress(0)
   }, [takes.length])
 
-  const togglePlay = useCallback(() => {
-    setIsPlaying((prev) => !prev)
-  }, [])
-
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => !prev)
+    if (videoRef.current) videoRef.current.muted = !isMuted
+    if (audioRef.current) audioRef.current.muted = !isMuted
+  }, [isMuted])
+
+  const togglePlay = useCallback(() => {
+    setIsPlaying((prev) => {
+      const next = !prev
+      if (videoRef.current) {
+        if (next) videoRef.current.play().catch(() => {})
+        else videoRef.current.pause()
+      }
+      if (audioRef.current) {
+        if (next) audioRef.current.play().catch(() => {})
+        else audioRef.current.pause()
+      }
+      return next
+    })
   }, [])
 
-  // Sync video/audio playback with isPlaying & isMuted
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.muted = isMuted
-      if (isPlaying) {
-        videoRef.current.play().catch(() => {})
+  const castVote = useCallback(async (direction: 'up' | 'down') => {
+    if (!currentTake) return
+    const cur = userVotes[currentTake.id] || 0
+    let next = 0
+    let target: 'up' | 'down' | 'clear' = direction
+    if (direction === 'up') {
+      if (cur === 1) {
+        target = 'clear'
+        next = 0
       } else {
-        videoRef.current.pause()
+        target = 'up'
+        next = 1
+      }
+    } else {
+      if (cur === -1) {
+        target = 'clear'
+        next = 0
+      } else {
+        target = 'down'
+        next = -1
       }
     }
-    if (audioRef.current) {
-      audioRef.current.muted = isMuted
-      if (isPlaying) {
-        audioRef.current.play().catch(() => {})
-      } else {
-        audioRef.current.pause()
-      }
-    }
-  }, [isPlaying, isMuted, currentIndex])
 
-  // Timer for image / text takes (hold ~6 seconds, then auto-advance)
+    setUserVotes((prev) => ({ ...prev, [currentTake.id]: next }))
+
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      let voterKey = user?.id
+      if (!voterKey && typeof window !== 'undefined') {
+        voterKey = localStorage.getItem('efir_web_voter') || ''
+        if (!voterKey) {
+          voterKey = 'web_' + Math.random().toString(36).slice(2, 12)
+          localStorage.setItem('efir_web_voter', voterKey)
+        }
+      }
+      await supabase.rpc('vote_take', {
+        p_take_id: currentTake.id,
+        p_voter_key: voterKey || 'web_anonymous',
+        p_direction: target,
+      })
+    } catch (err) {
+      console.warn('Vote RPC error:', err)
+    }
+  }, [currentTake, userVotes])
+
+  // Handle media switching
   useEffect(() => {
     if (!currentTake) return
 
+    // Clear timers
     if (imageTimerRef.current) clearTimeout(imageTimerRef.current)
     if (imageIntervalRef.current) clearInterval(imageIntervalRef.current)
+    setImageProgress(0)
 
-    const isStatic = currentTake.media.type === 'image' || currentTake.media.type === 'text'
+    const media = currentTake.media
 
-    if (isStatic && isPlaying) {
-      setImageProgress(0)
+    if (media.type === 'video' && videoRef.current) {
+      videoRef.current.muted = isMuted
+      videoRef.current.currentTime = 0
+      videoRef.current.play().catch(() => {})
+    } else if (media.type === 'audio' && audioRef.current) {
+      audioRef.current.muted = isMuted
+      audioRef.current.currentTime = 0
+      audioRef.current.play().catch(() => {})
+    } else if (media.type === 'image' || media.type === 'text') {
       const durationMs = 6000
-      const tickMs = 50
+      const tickMs = 60
       let elapsed = 0
 
       imageIntervalRef.current = setInterval(() => {
+        if (!isPlaying) return
         elapsed += tickMs
         setImageProgress(Math.min(100, (elapsed / durationMs) * 100))
       }, tickMs)
@@ -128,18 +190,23 @@ export function WatchPlayer({ initialTakes = [] }: WatchPlayerProps) {
     }
   }, [currentTake, isPlaying, handleNext])
 
-  // Keyboard navigation
+  // Keyboard navigation & remote consistency
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept if user is typing in an input
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return
 
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      if (e.key === 'ArrowRight') {
         e.preventDefault()
         handleNext()
-      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
         handlePrev()
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        castVote('up')
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        castVote('down')
       } else if (e.key === ' ' || e.code === 'Space') {
         e.preventDefault()
         togglePlay()
@@ -151,7 +218,7 @@ export function WatchPlayer({ initialTakes = [] }: WatchPlayerProps) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleNext, handlePrev, togglePlay, toggleMute])
+  }, [handleNext, handlePrev, togglePlay, toggleMute, castVote])
 
   if (loading) {
     return (
@@ -168,14 +235,18 @@ export function WatchPlayer({ initialTakes = [] }: WatchPlayerProps) {
     return (
       <main className="watch-main section-wrap">
         <div className="watch-empty-state">
-          <EfIrMark className="empty-mark" />
-          <h1>The Airwaves are quiet — for now.</h1>
-          <p>When creators broadcast public takes from the app, they play here live.</p>
-          <Link href="/" className="outline-button" style={{ marginTop: 24 }}>
-            Return to Home
-          </Link>
+          <EfIrMark className="watch-empty-mark" />
+          <h2>The Airwaves are quiet — for now.</h2>
+          <p>Broadcast your first take from the phone app to start the live stream.</p>
+          <div className="watch-empty-actions">
+            <Link className="primary-button" href="/">
+              Back to Home
+            </Link>
+            <Link className="outline-button" href="/studio">
+              Go to Studio
+            </Link>
+          </div>
         </div>
-        <Disclosure />
       </main>
     )
   }
@@ -194,8 +265,11 @@ export function WatchPlayer({ initialTakes = [] }: WatchPlayerProps) {
     year: 'numeric',
   }).format(new Date(currentTake.created_at))
 
-  const upVotes = currentTake.reactions?.up || currentTake.reactions?.likes || 0
-  const downVotes = currentTake.reactions?.down || currentTake.reactions?.dislikes || 0
+  const baseUp = currentTake.reactions?.up || 0
+  const baseDown = currentTake.reactions?.down || 0
+  const userVote = userVotes[currentTake.id] || 0
+  const displayUp = baseUp + (userVote === 1 ? 1 : 0)
+  const displayDown = baseDown + (userVote === -1 ? 1 : 0)
 
   return (
     <main className="watch-main section-wrap">
@@ -203,10 +277,34 @@ export function WatchPlayer({ initialTakes = [] }: WatchPlayerProps) {
       <div className="watch-top-bar">
         <div className="watch-live-indicator">
           <span className="on-air-dot" />
-          <span className="watch-tag">THE AIRWAVES</span>
+          <span className="watch-tag">{streamMode === 'airwaves' ? 'THE AIRWAVES' : 'TOP TAKES (7D)'}</span>
           <span className="watch-pos">
             {currentIndex + 1} / {takes.length}
           </span>
+        </div>
+
+        {/* Stream switcher (Airwaves vs Top Takes) */}
+        <div className="watch-stream-tabs">
+          <button
+            type="button"
+            className={`watch-tab-pill ${streamMode === 'airwaves' ? 'is-active' : ''}`}
+            onClick={() => {
+              setStreamMode('airwaves')
+              setCurrentIndex(0)
+            }}
+          >
+            Airwaves
+          </button>
+          <button
+            type="button"
+            className={`watch-tab-pill ${streamMode === 'top' ? 'is-active' : ''}`}
+            onClick={() => {
+              setStreamMode('top')
+              setCurrentIndex(0)
+            }}
+          >
+            Top Takes
+          </button>
         </div>
 
         <div className="watch-controls-top">
@@ -248,25 +346,34 @@ export function WatchPlayer({ initialTakes = [] }: WatchPlayerProps) {
           {media.type === 'video' && playable ? (
             <video
               ref={videoRef}
-              key={currentTake.id}
+              className="watch-video-element"
               src={playable}
               poster={poster}
-              className="watch-stage-video"
               playsInline
-              autoPlay
-              muted={isMuted}
+              preload="auto"
               onEnded={handleNext}
             />
           ) : media.type === 'audio' && audioSrc ? (
             <div className="watch-audio-stage">
-              {poster ? (
-                <img src={poster} alt="" className="watch-audio-bg" />
-              ) : (
-                <div className="watch-audio-glow" />
-              )}
-              <div className="watch-audio-wave-wrap">
-                <AudioLines className="wave-icon" aria-hidden="true" />
-                <div className="watch-wave-bars">
+              <audio
+                ref={audioRef}
+                src={audioSrc}
+                preload="auto"
+                onEnded={handleNext}
+              />
+              <div className="watch-audio-visual">
+                {author.avatar_url ? (
+                  <img
+                    className="watch-audio-avatar"
+                    src={author.avatar_url}
+                    alt=""
+                  />
+                ) : (
+                  <div className="watch-audio-avatar watch-audio-fallback">
+                    {authorName.slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <div className="watch-wave-bars" aria-hidden="true">
                   <span />
                   <span />
                   <span />
@@ -275,99 +382,101 @@ export function WatchPlayer({ initialTakes = [] }: WatchPlayerProps) {
                   <span />
                   <span />
                 </div>
+                <p className="watch-audio-label">VOICE TAKE BROADCASTING</p>
               </div>
-              <audio
-                ref={audioRef}
-                key={currentTake.id}
-                src={audioSrc}
-                autoPlay
-                muted={isMuted}
-                onEnded={handleNext}
-              />
             </div>
-          ) : media.type === 'image' && poster ? (
+          ) : media.type === 'image' && (media.image_url || media.raw_url) ? (
             <div className="watch-image-stage">
               <img
-                key={currentTake.id}
-                src={poster}
-                alt={currentTake.comment || 'Broadcast take'}
-                className="watch-stage-img"
+                className="watch-image-element"
+                src={media.image_url || media.raw_url || ''}
+                alt={currentTake.comment || 'Take image'}
               />
             </div>
           ) : (
             <div className="watch-text-stage">
-              <EfIrMark className="text-stage-mark" />
-              <p className="watch-text-content">
-                {currentTake.comment || 'A live commentary take'}
-              </p>
+              <AudioLines className="watch-text-icon" aria-hidden="true" />
+              <p className="watch-text-quote">"{currentTake.quote}"</p>
+              {currentTake.comment && (
+                <p className="watch-text-commentary">{currentTake.comment}</p>
+              )}
             </div>
           )}
 
-          {/* Pause Overlay indicator */}
+          {/* Floating Play/Pause Indicator when paused */}
           {!isPlaying && (
-            <div className="watch-paused-overlay">
-              <div className="paused-pill">
-                <Pause aria-hidden="true" />
+            <div className="watch-paused-overlay" aria-hidden="true">
+              <div className="watch-paused-badge">
+                <Play className="play-icon" />
                 <span>PAUSED</span>
               </div>
             </div>
           )}
         </div>
 
-        {/* Floating Side Prev/Next Nav Arrows */}
+        {/* Previous / Next Floating Arrows */}
         <button
           type="button"
           className="watch-nav-arrow watch-nav-prev"
           onClick={handlePrev}
-          aria-label="Previous take (Left Arrow)"
-          title="Previous take (Left Arrow)"
+          aria-label="Previous take"
+          title="Previous (←)"
         >
-          <ChevronLeft aria-hidden="true" />
+          <ChevronLeft />
         </button>
-
         <button
           type="button"
           className="watch-nav-arrow watch-nav-next"
           onClick={handleNext}
-          aria-label="Next take (Right Arrow)"
-          title="Next take (Right Arrow)"
+          aria-label="Next take"
+          title="Next (→)"
         >
-          <ChevronRight aria-hidden="true" />
+          <ChevronRight />
         </button>
       </div>
 
-      {/* Info & Metadata Panel */}
-      <div className="watch-meta-card">
-        <div className="watch-author-block">
+      {/* Bottom Info Card */}
+      <div className="watch-card">
+        <div className="watch-author-row">
           {author.avatar_url ? (
-            <img src={author.avatar_url} alt="" className="watch-avatar" />
+            <img className="watch-avatar" src={author.avatar_url} alt="" />
           ) : (
             <div className="watch-avatar watch-avatar-fallback">
               {authorName.slice(0, 1).toUpperCase()}
             </div>
           )}
 
-          <div className="watch-author-details">
-            <div className="watch-author-line">
+          <div className="watch-author-info">
+            <div className="watch-author-name-row">
               {authorId ? (
                 <Link
+                  className="watch-author-name"
                   href={`/c/${authorId}`}
-                  className="watch-author-link"
-                  title="View creator channel"
+                  title={`View ${authorName}'s public channel`}
                 >
-                  <span className="author-name">{authorName}</span>
-                  <span className="channel-pill">Channel ↗</span>
+                  {authorName}
                 </Link>
               ) : (
-                <span className="author-name">{authorName}</span>
+                <span className="watch-author-name">{authorName}</span>
               )}
-              {currentTake.intent && (
-                <span className="watch-intent-badge">{currentTake.intent}</span>
+              {author.username && (
+                <span className="watch-handle">@{author.username}</span>
               )}
             </div>
-            {author.username && (
-              <p className="watch-username">@{author.username}</p>
+            {currentTake.source?.title && (
+              <span className="watch-source-badge">
+                Source: {currentTake.source.title}
+              </span>
             )}
+          </div>
+
+          <div className="watch-card-actions">
+            <Link
+              className="outline-button watch-channel-link"
+              href={authorId ? `/c/${authorId}` : '/'}
+            >
+              Channel
+            </Link>
           </div>
         </div>
 
@@ -378,11 +487,27 @@ export function WatchPlayer({ initialTakes = [] }: WatchPlayerProps) {
         <div className="watch-bottom-meta">
           <time className="watch-date">{dateFormatted}</time>
           <div className="watch-reactions">
-            <span>↑ {upVotes}</span>
-            <span>↓ {downVotes}</span>
+            <button
+              type="button"
+              className={`watch-vote-pill ${userVote === 1 ? 'is-up-active' : ''}`}
+              onClick={() => castVote('up')}
+              aria-label="Boost take"
+              title="Boost take (↑ key)"
+            >
+              <span>▲</span> {displayUp}
+            </button>
+            <button
+              type="button"
+              className={`watch-vote-pill ${userVote === -1 ? 'is-down-active' : ''}`}
+              onClick={() => castVote('down')}
+              aria-label="Pass take"
+              title="Pass take (↓ key)"
+            >
+              <span>▼</span> {displayDown}
+            </button>
           </div>
           <span className="watch-hotkeys-hint">
-            Hotkeys: ← / → Next · Space Pause · M Mute
+            Hotkeys: ← / → Next · ↑ Boost · ↓ Pass · Space Pause · M Mute
           </span>
         </div>
       </div>
