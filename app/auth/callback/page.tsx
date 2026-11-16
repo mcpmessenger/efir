@@ -31,6 +31,14 @@ export default function AuthCallbackPage() {
       setMode('checking')
 
       async function finishWebSignIn() {
+        // Honor a same-origin `next` path (e.g. /link?code=XXXXXX from the
+        // TV-link page); anything else falls back to /studio.
+        const nextParam = url.searchParams.get('next')
+        const next =
+          nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//')
+            ? nextParam
+            : '/studio'
+
         const providerError = url.searchParams.get('error_description') || url.searchParams.get('error')
         if (providerError) {
           if (active) {
@@ -50,13 +58,13 @@ export default function AuthCallbackPage() {
             }
             return
           }
-          window.location.replace('/studio')
+          window.location.replace(next)
           return
         }
 
         const { data: { session } } = await supabase.auth.getSession()
         if (session) {
-          window.location.replace('/studio')
+          window.location.replace(next)
           return
         }
         if (active) {

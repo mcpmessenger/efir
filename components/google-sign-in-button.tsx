@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
-export function GoogleSignInButton({ compact = false }: { compact?: boolean }) {
+export function GoogleSignInButton({ compact = false, nextPath }: { compact?: boolean; nextPath?: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -17,6 +17,7 @@ export function GoogleSignInButton({ compact = false }: { compact?: boolean }) {
         ? new URL(configuredRedirect)
         : new URL('/auth/callback', window.location.origin)
       callback.searchParams.set('flow', 'web')
+      if (nextPath) callback.searchParams.set('next', nextPath)
 
       const { error: signInError } = await createClient().auth.signInWithOAuth({
         provider: 'google',
